@@ -1,0 +1,68 @@
+{
+  "version": "1.0",
+  "orientation": "flat-topped",
+  "layers": [
+    {
+      "index": 0,
+      "regions": [
+        {
+          "id": "r_mountains",
+          "name": "Dragon's Spine",
+          "attributes": {
+            "biome": "mountain",
+            "minerals": ["iron", "gold"]
+          },
+          "tiles": [
+            {"q": 0, "r": 0},
+            {"q": 1, "r": 0},
+            {"q": 2, "r": 0},
+            {"q": 3, "r": 0},
+            {"q": 4, "r": 0}
+          ]
+        },
+        {
+          "id": "r_plains",
+          "name": "Golden Fields",
+          "attributes": {
+            "biome": "plains",
+            "fertility": 8
+          },
+          "tiles": [
+            {"q": 0, "r": 1},
+            {"q": 1, "r": 1},
+            {"q": 2, "r": 1},
+            {"q": 0, "r": 2},
+            {"q": 1, "r": 2}
+          ]
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "regions": [
+        {
+          "id": "k_dwarves",
+          "name": "Dwarven Kingdom",
+          "attributes": {
+            "faction": "Dwarves",
+            "wealth": 9000
+          },
+          "childRegions": [
+            "r_mountains"
+          ]
+        },
+        {
+          "id": "k_humans",
+          "name": "Human Kingdom",
+          "attributes": {
+            "faction": "Humans",
+            "wealth": 4000
+          },
+          "childRegions": [
+            "r_plains"
+          ]
+        }
+      ]
+    }
+  ]
+}

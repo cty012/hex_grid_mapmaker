@@ -1,0 +1,58 @@
+{
+  "version": "1.0",
+  "orientation": "pointy-topped",
+  "layers": [
+    {
+      "index": 0,
+      "regions": [
+        {
+          "id": "r_forest_1",
+          "name": "Whispering Woods",
+          "attributes": {
+            "biome": "forest",
+            "dangerLevel": 3
+          },
+          "tiles": [
+            {"q": 0, "r": 0},
+            {"q": 1, "r": -1},
+            {"q": 1, "r": 0},
+            {"q": 0, "r": 1},
+            {"q": -1, "r": 1},
+            {"q": -1, "r": 0},
+            {"q": 0, "r": -1}
+          ]
+        },
+        {
+          "id": "r_water_1",
+          "name": "Crystal Lake",
+          "attributes": {
+            "biome": "water",
+            "fishingYield": "high"
+          },
+          "tiles": [
+            {"q": 2, "r": -1},
+            {"q": 3, "r": -2},
+            {"q": 2, "r": -2}
+          ]
+        }
+      ]
+    },
+    {
+      "index": 1,
+      "regions": [
+        {
+          "id": "p_elven_territory",
+          "name": "Elven Domain",
+          "attributes": {
+            "faction": "Elves",
+            "population": 1500
+          },
+          "childRegions": [
+            "r_forest_1",
+            "r_water_1"
+          ]
+        }
+      ]
+    }
+  ]
+}
