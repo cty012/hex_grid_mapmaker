@@ -452,8 +452,25 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  String _getNextAvailableRegionId() {
+    Set<int> usedIntIds = {};
+    for (var layer in hexMap.layers) {
+      for (var region in layer.regions) {
+        int? intId = int.tryParse(region.id);
+        if (intId != null && intId > 0) {
+          usedIntIds.add(intId);
+        }
+      }
+    }
+    int nextId = 1;
+    while (usedIntIds.contains(nextId)) {
+      nextId++;
+    }
+    return nextId.toString();
+  }
+
   void addRegion(String name) {
-    final newId = 'region_${DateTime.now().millisecondsSinceEpoch}';
+    final newId = _getNextAvailableRegionId();
     activeLayer.regions.add(
       HexRegion(
         id: newId,
@@ -464,6 +481,39 @@ class AppState extends ChangeNotifier {
     );
     activeRegionId = newId;
     notifyListeners();
+  }
+
+  String? updateRegionId(HexRegion region, String newId) {
+    if (newId.trim().isEmpty) return 'ID cannot be empty';
+    if (region.id == newId) return null;
+
+    for (var layer in hexMap.layers) {
+      for (var r in layer.regions) {
+        if (r.id == newId) {
+          return 'ID already in use';
+        }
+      }
+    }
+
+    String oldId = region.id;
+    region.id = newId;
+
+    if (activeRegionId == oldId) {
+      activeRegionId = newId;
+    }
+
+    try {
+      final parentLayer = hexMap.layers.firstWhere((l) => l.index == activeLayerIndex + 1);
+      for (var parentRegion in parentLayer.regions) {
+        if (parentRegion.childRegions?.contains(oldId) ?? false) {
+          int index = parentRegion.childRegions!.indexOf(oldId);
+          parentRegion.childRegions![index] = newId;
+        }
+      }
+    } catch (_) {}
+
+    notifyListeners();
+    return null;
   }
 
   void deleteRegion(String id) {

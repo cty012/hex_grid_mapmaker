@@ -11,14 +11,52 @@ class PropertiesPanel extends StatefulWidget {
 
 class _PropertiesPanelState extends State<PropertiesPanel> {
   final TextEditingController _nameController = TextEditingController();
+  final TextEditingController _idController = TextEditingController();
+  final FocusNode _idFocusNode = FocusNode();
+  String? _idError;
+
+  @override
+  void initState() {
+    super.initState();
+    _idFocusNode.addListener(() {
+      if (!_idFocusNode.hasFocus && mounted) {
+        final state = context.read<AppState>();
+        final activeRegion = state.activeRegion;
+        if (activeRegion != null) {
+          final val = _idController.text;
+          if (val != activeRegion.id) {
+            final error = state.updateRegionId(activeRegion, val);
+            if (error != null) {
+              setState(() { _idError = error; });
+            } else {
+              setState(() { _idError = null; });
+            }
+          }
+        }
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _nameController.dispose();
+    _idController.dispose();
+    _idFocusNode.dispose();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
     final state = context.watch<AppState>();
     final activeRegion = state.activeRegion;
 
-    if (activeRegion != null && _nameController.text != activeRegion.name) {
-      _nameController.text = activeRegion.name;
+    if (activeRegion != null) {
+      if (_nameController.text != activeRegion.name) {
+        _nameController.text = activeRegion.name;
+      }
+      if (!_idFocusNode.hasFocus && _idController.text != activeRegion.id && _idError == null) {
+        _idController.text = activeRegion.id;
+      }
     }
 
     return Container(
@@ -105,18 +143,33 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
           'ID',
           style: TextStyle(fontSize: 12, fontWeight: FontWeight.w600, color: Colors.white54),
         ),
-        const SizedBox(height: 8),
-        Container(
-          width: double.infinity,
-          padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
-          decoration: BoxDecoration(
-            color: Colors.black12,
-            borderRadius: BorderRadius.circular(8),
+        TextField(
+          controller: _idController,
+          focusNode: _idFocusNode,
+          style: const TextStyle(fontFamily: 'monospace'),
+          decoration: InputDecoration(
+            filled: true,
+            fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(8),
+              borderSide: BorderSide.none,
+            ),
+            contentPadding: const EdgeInsets.symmetric(horizontal: 12, vertical: 12),
+            errorText: _idError,
           ),
-          child: Text(
-            activeRegion.id,
-            style: const TextStyle(color: Colors.white54, fontFamily: 'monospace'),
-          ),
+          onChanged: (val) {
+            if (_idError != null) {
+              setState(() { _idError = null; });
+            }
+          },
+          onSubmitted: (val) {
+            final error = state.updateRegionId(activeRegion, val);
+            if (error != null) {
+              setState(() { _idError = error; });
+            } else {
+              setState(() { _idError = null; });
+            }
+          },
         ),
       ],
     );
