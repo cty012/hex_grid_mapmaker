@@ -7,7 +7,8 @@ import 'package:flutter/material.dart';
 import 'package:hex_grid_mapmaker/models/hex_models.dart';
 import 'package:hex_grid_mapmaker/state/app_state.dart';
 import 'package:hex_grid_mapmaker/ui/hex_painter.dart';
-import 'package:hex_grid_mapmaker/ui/inspector_panel.dart';
+import 'package:hex_grid_mapmaker/ui/hierarchy_panel.dart';
+import 'package:hex_grid_mapmaker/ui/properties_panel.dart';
 import 'package:hex_grid_mapmaker/ui/tool_palette.dart';
 import 'package:provider/provider.dart';
 
@@ -18,7 +19,8 @@ class EditorScreen extends StatefulWidget {
   State<EditorScreen> createState() => _EditorScreenState();
 }
 
-class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderStateMixin {
+class _EditorScreenState extends State<EditorScreen>
+    with SingleTickerProviderStateMixin {
   final double hexSize = 40.0;
   final TransformationController _transformationController =
       TransformationController();
@@ -26,7 +28,9 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
   HexTile? hoverTile;
 
   double _currentScale = 1.0;
-  
+
+  final List<_NotificationItem> _notifications = [];
+
   late final AnimationController _pulseController;
   late final Animation<double> _pulseAnimation;
 
@@ -60,6 +64,26 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
     super.dispose();
   }
 
+  void _showNotification(String message) {
+    if (!mounted) return;
+    final item = _NotificationItem(
+      id:
+          DateTime.now().millisecondsSinceEpoch.toString() +
+          math.Random().nextInt(1000).toString(),
+      message: message,
+    );
+    setState(() {
+      _notifications.add(item);
+    });
+  }
+
+  void _removeNotification(String id) {
+    if (!mounted) return;
+    setState(() {
+      _notifications.removeWhere((n) => n.id == id);
+    });
+  }
+
   void _toggleOrientation(AppState state) {
     state.setOrientation(
       state.hexMap.orientation == 'pointy-topped'
@@ -82,23 +106,15 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
         final map = HexMap.fromJson(json);
         state.loadMap(map);
         _centerAndScaleMap(map);
-        if (mounted) {
-          ScaffoldMessenger.of(context).showSnackBar(
-            const SnackBar(content: Text('Map loaded successfully')),
-          );
-        }
+        _showNotification('Map loaded successfully');
       } catch (e) {
-        if (mounted) {
-          ScaffoldMessenger.of(
-            context,
-          ).showSnackBar(SnackBar(content: Text('Error loading map: $e')));
-        }
+        _showNotification('Error loading map: $e');
       }
     }
   }
 
   void _centerAndScaleMap(HexMap map) {
-    if (map.layers.isEmpty || map.layers[0].regions.isEmpty) return;
+    if (map.layers.isEmpty) return;
 
     double minX = double.infinity;
     double maxX = double.negativeInfinity;
@@ -107,24 +123,26 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
 
     bool hasTiles = false;
 
-    for (var region in map.layers[0].regions) {
-      if (region.tiles != null) {
-        for (var tile in region.tiles!) {
-          hasTiles = true;
-          final isPointy = map.orientation == 'pointy-topped';
-          double x, y;
-          if (isPointy) {
-            x = hexSize * math.sqrt(3) * (tile.q + tile.r / 2);
-            y = hexSize * 3 / 2 * tile.r;
-          } else {
-            x = hexSize * 3 / 2 * tile.q;
-            y = hexSize * math.sqrt(3) * (tile.r + tile.q / 2);
-          }
+    for (var layer in map.layers) {
+      for (var region in layer.regions) {
+        if (region.tiles != null) {
+          for (var tile in region.tiles!) {
+            hasTiles = true;
+            final isPointy = map.orientation == 'pointy-topped';
+            double x, y;
+            if (isPointy) {
+              x = hexSize * math.sqrt(3) * (tile.q + tile.r / 2);
+              y = hexSize * 3 / 2 * tile.r;
+            } else {
+              x = hexSize * 3 / 2 * tile.q;
+              y = hexSize * math.sqrt(3) * (tile.r + tile.q / 2);
+            }
 
-          if (x < minX) minX = x;
-          if (x > maxX) maxX = x;
-          if (y < minY) minY = y;
-          if (y > maxY) maxY = y;
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
         }
       }
     }
@@ -141,7 +159,9 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
 
     if (mapWidth == 0 || mapHeight == 0) return;
 
-    final viewportWidth = MediaQuery.of(context).size.width - 300;
+    final viewportWidth =
+        MediaQuery.of(context).size.width -
+        600; // 280 (Hierarchy) + 320 (Properties)
     final viewportHeight = MediaQuery.of(context).size.height - kToolbarHeight;
 
     double scaleX = viewportWidth / mapWidth;
@@ -157,9 +177,11 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
     double targetX = (viewportWidth / 2) - (childCenterX * scale);
     double targetY = (viewportHeight / 2) - (childCenterY * scale);
 
-    _currentScale = scale;
-    _transformationController.value = Matrix4.diagonal3Values(scale, scale, 1.0)
-      ..setTranslationRaw(targetX, targetY, 0.0);
+    _transformationController.value = Matrix4.diagonal3Values(
+      scale,
+      scale,
+      scale,
+    )..setTranslationRaw(targetX, targetY, 0.0);
   }
 
   Future<void> _saveMap(AppState state) async {
@@ -174,11 +196,7 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
       final file = File(result);
       final content = jsonEncode(state.hexMap.toJson());
       await file.writeAsString(content);
-      if (mounted) {
-        ScaffoldMessenger.of(
-          context,
-        ).showSnackBar(const SnackBar(content: Text('Map saved successfully')));
-      }
+      _showNotification('Map saved successfully');
     }
   }
 
@@ -243,11 +261,7 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
       }
     } else if (state.activeTool == 'draw') {
       if (state.activeRegionId == null) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          const SnackBar(
-            content: Text('Please select a region in the Inspector first.'),
-          ),
-        );
+        _showNotification('Please select a region in the Inspector first.');
         return;
       }
       state.addTileToActiveRegion(tile);
@@ -263,60 +277,74 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
 
     return Scaffold(
       appBar: AppBar(
-        title: const Text(
-          'Hex Grid Mapmaker',
-          style: TextStyle(fontWeight: FontWeight.w600),
+        title: Row(
+          children: [
+            Icon(Icons.hexagon, color: Theme.of(context).colorScheme.primary),
+            const SizedBox(width: 12),
+            const Text(
+              'Hex Grid Mapmaker',
+              style: TextStyle(
+                fontWeight: FontWeight.w700,
+                fontSize: 18,
+                letterSpacing: 0.5,
+              ),
+            ),
+          ],
         ),
         backgroundColor: Theme.of(context).colorScheme.surface,
+        elevation: 0,
+        bottom: PreferredSize(
+          preferredSize: const Size.fromHeight(1),
+          child: Container(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            height: 1,
+          ),
+        ),
         actions: [
-          Row(
-            children: [
-              const Text('Grid:'),
-              Switch(
-                value: state.showGrid,
-                onChanged: (val) => state.setShowGrid(val),
-              ),
-            ],
+          _buildTopBarSwitch(
+            context,
+            label: 'Grid',
+            value: state.showGrid,
+            onChanged: (val) => state.setShowGrid(val),
           ),
           const SizedBox(width: 16),
-          Row(
-            children: [
-              const Text('Labels:'),
-              const SizedBox(width: 8),
-              DropdownButton<String>(
-                value: state.labelDisplay,
-                items: ['None', 'ID', 'Name'].map((String value) {
-                  return DropdownMenuItem<String>(
-                    value: value,
-                    child: Text(value),
-                  );
-                }).toList(),
-                onChanged: (val) {
-                  if (val != null) state.setLabelDisplay(val);
-                },
-              ),
-            ],
+          _buildTopBarDropdown(
+            context,
+            label: 'Labels',
+            value: state.labelDisplay,
+            items: ['None', 'ID', 'Name'],
+            onChanged: (val) {
+              if (val != null) state.setLabelDisplay(val);
+            },
           ),
           const SizedBox(width: 24),
-          IconButton(
-            icon: const Icon(Icons.screen_rotation),
+          _buildTopBarActionButton(
+            context,
+            icon: Icons.screen_rotation,
             tooltip: 'Toggle Orientation',
             onPressed: () => _toggleOrientation(state),
           ),
-          IconButton(
-            icon: const Icon(Icons.file_open),
+          const SizedBox(width: 8),
+          _buildTopBarActionButton(
+            context,
+            icon: Icons.folder_open,
             tooltip: 'Load JSON',
             onPressed: () => _loadMap(state),
           ),
-          IconButton(
-            icon: const Icon(Icons.save),
+          const SizedBox(width: 8),
+          _buildTopBarActionButton(
+            context,
+            icon: Icons.save,
             tooltip: 'Save JSON',
             onPressed: () => _saveMap(state),
+            isPrimary: true,
           ),
+          const SizedBox(width: 16),
         ],
       ),
       body: Row(
         children: [
+          const HierarchyPanel(),
           Expanded(
             child: Stack(
               children: [
@@ -346,13 +374,264 @@ class _EditorScreenState extends State<EditorScreen> with SingleTickerProviderSt
                     ),
                   ),
                 ),
-                const ToolPalette(),
+                const Align(
+                  alignment: Alignment.bottomCenter,
+                  child: Padding(
+                    padding: EdgeInsets.only(bottom: 24.0),
+                    child: ToolPalette(),
+                  ),
+                ),
+                Positioned(
+                  right: 24,
+                  bottom: 80,
+                  width: 320,
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    mainAxisAlignment: MainAxisAlignment.end,
+                    children: _notifications.map((item) {
+                      return _NotificationOverlay(
+                        key: ValueKey(item.id),
+                        item: item,
+                        onDismissed: () => _removeNotification(item.id),
+                      );
+                    }).toList(),
+                  ),
+                ),
+                Positioned(
+                  right: 24,
+                  bottom: 24,
+                  child: FloatingActionButton(
+                    mini: true,
+                    elevation: 4,
+                    backgroundColor: Theme.of(
+                      context,
+                    ).colorScheme.surface.withValues(alpha: 0.85),
+                    foregroundColor: Colors.white,
+                    onPressed: () => _centerAndScaleMap(state.hexMap),
+                    tooltip: 'Recenter Map',
+                    child: const Icon(Icons.center_focus_strong),
+                  ),
+                ),
               ],
             ),
           ),
-          const VerticalDivider(width: 1, thickness: 1),
-          const InspectorPanel(),
+          const PropertiesPanel(),
         ],
+      ),
+    );
+  }
+
+  Widget _buildTopBarSwitch(
+    BuildContext context, {
+    required String label,
+    required bool value,
+    required ValueChanged<bool> onChanged,
+  }) {
+    return Row(
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+            color: Colors.white70,
+          ),
+        ),
+        const SizedBox(width: 8),
+        SizedBox(
+          height: 24,
+          child: Switch(
+            value: value,
+            onChanged: onChanged,
+            activeThumbColor: Theme.of(context).colorScheme.primary,
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTopBarDropdown(
+    BuildContext context, {
+    required String label,
+    required String value,
+    required List<String> items,
+    required ValueChanged<String?> onChanged,
+  }) {
+    return Row(
+      children: [
+        Text(
+          label,
+          style: const TextStyle(
+            fontSize: 13,
+            fontWeight: FontWeight.w500,
+            color: Colors.white70,
+          ),
+        ),
+        const SizedBox(width: 8),
+        Container(
+          height: 32,
+          padding: const EdgeInsets.symmetric(horizontal: 12),
+          decoration: BoxDecoration(
+            color: Theme.of(context).colorScheme.surfaceContainerHighest,
+            borderRadius: BorderRadius.circular(6),
+          ),
+          child: DropdownButtonHideUnderline(
+            child: DropdownButton<String>(
+              value: value,
+              isDense: true,
+              icon: const Icon(Icons.arrow_drop_down, size: 18),
+              style: const TextStyle(fontSize: 13, color: Colors.white),
+              items: items.map((String val) {
+                return DropdownMenuItem<String>(value: val, child: Text(val));
+              }).toList(),
+              onChanged: onChanged,
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildTopBarActionButton(
+    BuildContext context, {
+    required IconData icon,
+    required String tooltip,
+    required VoidCallback onPressed,
+    bool isPrimary = false,
+  }) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: isPrimary
+            ? Theme.of(context).colorScheme.primary
+            : Theme.of(context).colorScheme.surfaceContainerHighest,
+        borderRadius: BorderRadius.circular(6),
+        child: InkWell(
+          borderRadius: BorderRadius.circular(6),
+          onTap: onPressed,
+          child: Container(
+            width: 36,
+            height: 36,
+            alignment: Alignment.center,
+            child: Icon(
+              icon,
+              size: 18,
+              color: isPrimary ? Colors.white : Colors.white70,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _NotificationItem {
+  final String id;
+  final String message;
+
+  _NotificationItem({required this.id, required this.message});
+}
+
+class _NotificationOverlay extends StatefulWidget {
+  final _NotificationItem item;
+  final VoidCallback onDismissed;
+
+  const _NotificationOverlay({
+    super.key,
+    required this.item,
+    required this.onDismissed,
+  });
+
+  @override
+  State<_NotificationOverlay> createState() => _NotificationOverlayState();
+}
+
+class _NotificationOverlayState extends State<_NotificationOverlay>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller;
+  late final Animation<double> _opacity;
+  late final Animation<Offset> _slide;
+
+  @override
+  void initState() {
+    super.initState();
+    _controller = AnimationController(
+      vsync: this,
+      duration: const Duration(milliseconds: 300),
+    );
+    _opacity = Tween<double>(
+      begin: 0.0,
+      end: 1.0,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
+    _slide = Tween<Offset>(
+      begin: const Offset(0, 0.5),
+      end: Offset.zero,
+    ).animate(CurvedAnimation(parent: _controller, curve: Curves.easeOut));
+
+    _controller.forward();
+
+    Future.delayed(const Duration(seconds: 4), () async {
+      if (mounted) {
+        await _controller.reverse();
+        widget.onDismissed();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return SizeTransition(
+      sizeFactor: CurvedAnimation(parent: _controller, curve: Curves.easeOut),
+      axisAlignment: -1.0,
+      child: SlideTransition(
+        position: _slide,
+        child: FadeTransition(
+          opacity: _opacity,
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 6.0),
+            child: Material(
+              color: Theme.of(context).colorScheme.surfaceContainerHighest,
+              elevation: 6,
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8),
+                side: BorderSide(
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.outline.withValues(alpha: 0.2),
+                ),
+              ),
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 12,
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.info_outline,
+                      size: 18,
+                      color: Theme.of(context).colorScheme.primary,
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Text(
+                        widget.item.message,
+                        style: const TextStyle(fontSize: 14),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        ),
       ),
     );
   }

@@ -25,29 +25,17 @@ class HexPainter extends CustomPainter {
 
     final hexMap = state.hexMap;
 
-    // Draw background grid
-    if (state.showGrid) {
-      final gridStroke = Paint()
-        ..color = Colors.white10
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 1.0 / scale;
-
-      // Draw a 40x40 grid around center
-      for (int q = -20; q <= 20; q++) {
-        for (int r = -20; r <= 20; r++) {
-          _drawHex(canvas, hexMap, gridStroke, null, HexTile(q: q, r: r));
-        }
-      }
-    }
-
     final selectedStrokePaint = Paint()
       ..color = Colors.yellowAccent.withValues(alpha: pulseAnimation.value)
       ..style = PaintingStyle.stroke
-      ..strokeWidth = 8.0 / scale;
+      ..strokeWidth = 3.0 / scale;
 
     final fillPaint = Paint()
       ..style = PaintingStyle.fill
       ..isAntiAlias = false;
+
+    List<VoidCallback> labelDrawers = [];
+    List<VoidCallback> highlightDrawers = [];
 
     for (int l = 0; l <= state.activeLayerIndex; l++) {
       HexLayer? currentLayer;
@@ -99,24 +87,28 @@ class HexPainter extends CustomPainter {
           canvas.clipPath(combinedPath);
           canvas.drawPath(combinedPath, fillPaint);
 
-          if (isSelected) {
-            final innerStroke = Paint()
-              ..color = selectedStrokePaint.color
-              ..style = PaintingStyle.stroke
-              ..strokeWidth = selectedStrokePaint.strokeWidth * 2;
-            canvas.drawPath(combinedPath, innerStroke);
-          }
           canvas.restore();
+
+          if (isSelected) {
+            highlightDrawers.add(() {
+              canvas.save();
+              canvas.clipPath(combinedPath);
+              final innerStroke = Paint()
+                ..color = selectedStrokePaint.color
+                ..style = PaintingStyle.stroke
+                ..strokeWidth = selectedStrokePaint.strokeWidth * 2;
+              canvas.drawPath(combinedPath, innerStroke);
+              canvas.restore();
+            });
+          }
         } else {
           for (var tile in regionTiles) {
-            Paint? currentStroke;
+            _drawHex(canvas, hexMap, null, fillPaint, tile);
             if (isSelected) {
-              currentStroke = selectedStrokePaint;
-            } else {
-              currentStroke = null;
+              highlightDrawers.add(() {
+                _drawHex(canvas, hexMap, selectedStrokePaint, null, tile);
+              });
             }
-
-            _drawHex(canvas, hexMap, currentStroke, fillPaint, tile);
           }
         }
 
@@ -210,29 +202,54 @@ class HexPainter extends CustomPainter {
           final center = region.cachedLabelPosition!;
           final label = state.labelDisplay == 'ID' ? region.id : region.name;
 
-          final textPainter = TextPainter(
-            text: TextSpan(
-              text: label,
-              style: TextStyle(
-                color: Colors.white,
-                fontSize: 36 / scale,
-                fontWeight: FontWeight.bold,
-                shadows: [Shadow(blurRadius: 9, color: Colors.black)],
+          labelDrawers.add(() {
+            final textPainter = TextPainter(
+              text: TextSpan(
+                text: label,
+                style: TextStyle(
+                  color: Colors.white,
+                  fontSize: 16 / scale,
+                  fontWeight: FontWeight.bold,
+                  shadows: const [Shadow(blurRadius: 4, color: Colors.black)],
+                ),
               ),
-            ),
-            textDirection: TextDirection.ltr,
-            textAlign: TextAlign.center,
-          );
-          textPainter.layout();
-          textPainter.paint(
-            canvas,
-            Offset(
-              center.dx - textPainter.width / 2,
-              center.dy - textPainter.height / 2,
-            ),
-          );
+              textDirection: TextDirection.ltr,
+              textAlign: TextAlign.center,
+            );
+            textPainter.layout();
+            textPainter.paint(
+              canvas,
+              Offset(
+                center.dx - textPainter.width / 2,
+                center.dy - textPainter.height / 2,
+              ),
+            );
+          });
         }
       }
+    }
+
+    // Draw background grid
+    if (state.showGrid) {
+      final gridStroke = Paint()
+        ..color = Colors.white30
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.0 / scale;
+
+      // Draw a 40x40 grid around center
+      for (int q = -20; q <= 20; q++) {
+        for (int r = -20; r <= 20; r++) {
+          _drawHex(canvas, hexMap, gridStroke, null, HexTile(q: q, r: r));
+        }
+      }
+    }
+
+    for (var drawer in highlightDrawers) {
+      drawer();
+    }
+
+    for (var drawer in labelDrawers) {
+      drawer();
     }
 
     if (hoverTile != null) {
@@ -242,7 +259,7 @@ class HexPainter extends CustomPainter {
       final hoverStroke = Paint()
         ..color = Colors.white
         ..style = PaintingStyle.stroke
-        ..strokeWidth = 4.0 / scale;
+        ..strokeWidth = 2.0 / scale;
       _drawHex(canvas, hexMap, hoverStroke, hoverFill, hoverTile!);
     }
   }

@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:google_fonts/google_fonts.dart';
 import 'package:hex_grid_mapmaker/state/app_state.dart';
 import 'package:hex_grid_mapmaker/ui/editor_screen.dart';
 import 'package:provider/provider.dart';
@@ -22,12 +23,14 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         brightness: Brightness.dark,
         colorScheme: const ColorScheme.dark(
-          primary: Colors.blueAccent,
-          secondary: Colors.tealAccent,
-          surface: Color(0xFF1E1E1E),
+          primary: Color(0xFF5E81AC),
+          secondary: Color(0xFF81A1C1),
+          surface: Color(0xFF161B22),
+          surfaceContainerHighest: Color(0xFF21262D),
         ),
+        textTheme: GoogleFonts.interTextTheme(ThemeData.dark().textTheme),
         useMaterial3: true,
-        scaffoldBackgroundColor: const Color(0xFF121212),
+        scaffoldBackgroundColor: const Color(0xFF0D1117),
       ),
       home: const EditorScreen(),
     );
