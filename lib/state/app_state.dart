@@ -33,9 +33,76 @@ class AppState extends ChangeNotifier {
   }
 
   void deleteLayer() {
-    if (activeLayerIndex == 0) return; // Cannot delete layer 0
-    hexMap.layers.removeWhere((l) => l.index == activeLayerIndex);
-    setActiveLayer(activeLayerIndex - 1);
+    int targetIndex = activeLayerIndex;
+    HexLayer targetLayer = hexMap.layers.firstWhere((l) => l.index == targetIndex);
+
+    if (targetIndex == 0) {
+      if (hexMap.layers.length == 1) {
+        // Only layer 0 exists, just clear its regions
+        targetLayer.regions.clear();
+      } else {
+        // Convert layer 1 regions to hex tiles
+        HexLayer layer1 = hexMap.layers.firstWhere((l) => l.index == 1);
+        for (var region in layer1.regions) {
+          Set<HexTile> allTiles = {};
+          if (region.childRegions != null) {
+            for (var childId in region.childRegions!) {
+              try {
+                var childRegion = targetLayer.regions.firstWhere((r) => r.id == childId);
+                if (childRegion.tiles != null) {
+                  allTiles.addAll(childRegion.tiles!);
+                }
+              } catch (_) {}
+            }
+          }
+          region.tiles = allTiles.toList();
+          region.childRegions = null;
+        }
+        hexMap.layers.remove(targetLayer);
+      }
+    } else {
+      // Deleting a layer > 0
+      try {
+        HexLayer parentLayer = hexMap.layers.firstWhere((l) => l.index == targetIndex + 1);
+        for (var region in parentLayer.regions) {
+          Set<String> newChildRegions = {};
+          if (region.childRegions != null) {
+            for (var childId in region.childRegions!) {
+              try {
+                var childRegion = targetLayer.regions.firstWhere((r) => r.id == childId);
+                if (childRegion.childRegions != null) {
+                  newChildRegions.addAll(childRegion.childRegions!);
+                }
+              } catch (_) {}
+            }
+          }
+          region.childRegions = newChildRegions.toList();
+        }
+      } catch (_) {} // No parent layer, that's fine
+      
+      hexMap.layers.remove(targetLayer);
+    }
+
+    // Shift indices down
+    if (!(targetIndex == 0 && hexMap.layers.length == 1 && hexMap.layers[0].index == 0)) {
+      for (var layer in hexMap.layers) {
+        if (layer.index > targetIndex) {
+          layer.index--;
+        }
+      }
+    }
+
+    int newActiveLayer = activeLayerIndex;
+    if (newActiveLayer >= hexMap.layers.length) {
+      newActiveLayer = hexMap.layers.length - 1;
+    }
+    if (newActiveLayer < 0) newActiveLayer = 0;
+    
+    activeLayerIndex = newActiveLayer;
+    activeRegionId = null;
+    
+    _recomputeAllBoundaries();
+    notifyListeners();
   }
 
   void setActiveLayer(int index) {

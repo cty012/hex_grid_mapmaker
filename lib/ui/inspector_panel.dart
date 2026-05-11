@@ -81,18 +81,17 @@ class _InspectorPanelState extends State<InspectorPanel> {
                 constraints: const BoxConstraints(),
                 padding: const EdgeInsets.all(4),
               ),
-              if (state.activeLayerIndex > 0)
-                IconButton(
-                  icon: const Icon(
-                    Icons.delete_outline,
-                    size: 20,
-                    color: Colors.redAccent,
-                  ),
-                  onPressed: () => state.deleteLayer(),
-                  tooltip: 'Delete Layer',
-                  constraints: const BoxConstraints(),
-                  padding: const EdgeInsets.all(4),
+              IconButton(
+                icon: const Icon(
+                  Icons.delete_outline,
+                  size: 20,
+                  color: Colors.redAccent,
                 ),
+                onPressed: () => _confirmDeleteLayer(context, state, state.activeLayerIndex),
+                tooltip: 'Delete Layer',
+                constraints: const BoxConstraints(),
+                padding: const EdgeInsets.all(4),
+              ),
             ],
           ),
         ],
@@ -140,7 +139,7 @@ class _InspectorPanelState extends State<InspectorPanel> {
                   onTap: () => state.setActiveRegion(region.id),
                   trailing: IconButton(
                     icon: const Icon(Icons.delete, size: 16),
-                    onPressed: () => state.deleteRegion(region.id),
+                    onPressed: () => _confirmDeleteRegion(context, state, region.id, region.name),
                   ),
                 );
               },
@@ -251,5 +250,57 @@ class _InspectorPanelState extends State<InspectorPanel> {
         ],
       ),
     );
+  }
+
+  Future<void> _confirmDeleteLayer(BuildContext context, AppState state, int layerIndex) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Delete Layer'),
+          content: Text('Are you sure you want to delete Layer $layerIndex?\nThis action cannot be undone.'),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () => Navigator.of(context).pop(false),
+            ),
+            TextButton(
+              child: const Text('Delete', style: TextStyle(color: Colors.red)),
+              onPressed: () => Navigator.of(context).pop(true),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (result == true) {
+      state.deleteLayer();
+    }
+  }
+
+  Future<void> _confirmDeleteRegion(BuildContext context, AppState state, String regionId, String regionName) async {
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (BuildContext context) {
+        return AlertDialog(
+          title: const Text('Delete Region'),
+          content: Text('Are you sure you want to delete region "$regionName"?\nThis action cannot be undone.'),
+          actions: <Widget>[
+            TextButton(
+              child: const Text('Cancel'),
+              onPressed: () => Navigator.of(context).pop(false),
+            ),
+            TextButton(
+              child: const Text('Delete', style: TextStyle(color: Colors.red)),
+              onPressed: () => Navigator.of(context).pop(true),
+            ),
+          ],
+        );
+      },
+    );
+
+    if (result == true) {
+      state.deleteRegion(regionId);
+    }
   }
 }

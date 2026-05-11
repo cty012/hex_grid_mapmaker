@@ -215,9 +215,9 @@ class HexPainter extends CustomPainter {
               text: label,
               style: TextStyle(
                 color: Colors.white,
-                fontSize: 48 / scale,
+                fontSize: 36 / scale,
                 fontWeight: FontWeight.bold,
-                shadows: [Shadow(blurRadius: 3 / scale, color: Colors.black)],
+                shadows: [Shadow(blurRadius: 9, color: Colors.black)],
               ),
             ),
             textDirection: TextDirection.ltr,
