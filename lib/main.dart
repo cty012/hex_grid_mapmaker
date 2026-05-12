@@ -1,13 +1,17 @@
 import 'package:flutter/material.dart';
 import 'package:google_fonts/google_fonts.dart';
-import 'package:hex_grid_mapmaker/state/app_state.dart';
+import 'package:hex_grid_mapmaker/state/editor_state.dart';
+import 'package:hex_grid_mapmaker/state/map_state.dart';
 import 'package:hex_grid_mapmaker/ui/editor_screen.dart';
 import 'package:provider/provider.dart';
 
 void main() {
   runApp(
-    ChangeNotifierProvider(
-      create: (context) => AppState(),
+    MultiProvider(
+      providers: [
+        ChangeNotifierProvider(create: (_) => MapState()),
+        ChangeNotifierProvider(create: (_) => EditorState()),
+      ],
       child: const MyApp(),
     ),
   );

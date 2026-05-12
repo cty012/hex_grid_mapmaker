@@ -1,24 +1,25 @@
-import 'dart:math' as math;
 import 'package:flutter/material.dart';
-import 'package:hex_grid_mapmaker/models/hex_models.dart';
-import 'package:hex_grid_mapmaker/state/app_state.dart';
+import 'package:hex_grid_mapmaker/models/enums.dart';
+import 'package:hex_grid_mapmaker/models/hex_region.dart';
+import 'package:hex_grid_mapmaker/models/hex_tile.dart';
+import 'package:hex_grid_mapmaker/services/hex_geometry.dart' as geo;
+import 'package:hex_grid_mapmaker/services/path_builder.dart' as paths;
+import 'package:hex_grid_mapmaker/state/editor_state.dart';
+import 'package:hex_grid_mapmaker/state/map_state.dart';
 import 'package:hex_grid_mapmaker/utils/polylabel.dart';
 
-/// The core rendering engine for the Hex Grid Mapmaker.
-/// 
-/// `HexPainter` runs inside a `CustomPaint` widget and is responsible for drawing
-/// the hexagonal grid, the filled regions, the geometric boundaries, and the text labels.
-/// It translates abstract axial coordinates into 2D pixel space and handles the complex
-/// geometric calculations required to reconstruct continuous paths from unordered edge sets.
+/// Pure painting — all math delegated to services.
 class HexPainter extends CustomPainter {
-  final AppState state;
+  final MapState mapState;
+  final EditorState editorState;
   final double hexSize;
   final HexTile? hoverTile;
   final double scale;
   final Animation<double> pulseAnimation;
 
   HexPainter({
-    required this.state,
+    required this.mapState,
+    required this.editorState,
     required this.pulseAnimation,
     this.hexSize = 40.0,
     this.hoverTile,
@@ -29,7 +30,8 @@ class HexPainter extends CustomPainter {
   void paint(Canvas canvas, Size size) {
     canvas.translate(size.width / 2, size.height / 2);
 
-    final hexMap = state.hexMap;
+    final hexMap = mapState.hexMap;
+    final orientation = hexMap.orientation;
 
     final selectedStrokePaint = Paint()
       ..color = Colors.yellowAccent.withValues(alpha: pulseAnimation.value)
@@ -40,51 +42,36 @@ class HexPainter extends CustomPainter {
       ..style = PaintingStyle.fill
       ..isAntiAlias = false;
 
-    List<VoidCallback> labelDrawers = [];
-    List<VoidCallback> highlightDrawers = [];
+    final labelDrawers = <VoidCallback>[];
+    final highlightDrawers = <VoidCallback>[];
 
-    for (int l = 0; l <= state.activeLayerIndex; l++) {
-      HexLayer? currentLayer;
-      try {
-        currentLayer = hexMap.layers.firstWhere((layer) => layer.index == l);
-      } catch (_) {}
-
+    for (int l = 0; l <= editorState.activeLayerIndex; l++) {
+      final currentLayer = hexMap.getLayer(l);
       if (currentLayer == null) continue;
+      final isActiveLayer = l == editorState.activeLayerIndex;
 
-      bool isActiveLayer = (l == state.activeLayerIndex);
-
-      for (var region in currentLayer.regions) {
-        List<HexTile> regionTiles = state.getTilesForRegion(region, l);
+      for (final region in currentLayer.regions) {
+        final regionTiles = mapState.getTilesForRegion(region, l);
         if (regionTiles.isEmpty) continue;
-        // Determine color
-        Color regionColor;
-        if (region.attributes.containsKey('color')) {
-          String colorStr = region.attributes['color'].toString();
-          if (colorStr.startsWith('#')) colorStr = colorStr.substring(1);
-          if (colorStr.length == 6) colorStr = 'FF$colorStr';
-          regionColor = Color(int.tryParse(colorStr, radix: 16) ?? 0xFF000000);
-        } else {
-          regionColor = Color(
-            (region.name.hashCode & 0xFFFFFF) | 0xFF000000,
-          ).withValues(alpha: 0.6);
-        }
 
+        Color regionColor = _resolveColor(region);
         if (!isActiveLayer) {
-          // Make lower layers fainter
           regionColor = regionColor.withValues(alpha: regionColor.a * 0.5);
         }
-
         fillPaint.color = regionColor;
-        final isSelected = isActiveLayer && region.id == state.activeRegionId;
+
+        final isSelected =
+            isActiveLayer && region.id == editorState.activeRegionId;
 
         List<Path> bPaths = [];
         if (region.cachedBoundary != null &&
             region.cachedBoundary!.isNotEmpty) {
-          bPaths = _buildBoundaryPaths(region.cachedBoundary!, hexMap);
+          bPaths = paths.buildBoundaryPaths(
+              region.cachedBoundary!, orientation, hexSize);
         }
 
-        Path combinedPath = Path();
-        for (var p in bPaths) {
+        final combinedPath = Path();
+        for (final p in bPaths) {
           combinedPath.addPath(p, Offset.zero);
         }
 
@@ -92,124 +79,43 @@ class HexPainter extends CustomPainter {
           canvas.save();
           canvas.clipPath(combinedPath);
           canvas.drawPath(combinedPath, fillPaint);
-
           canvas.restore();
 
           if (isSelected) {
             highlightDrawers.add(() {
               canvas.save();
               canvas.clipPath(combinedPath);
-              final innerStroke = Paint()
-                ..color = selectedStrokePaint.color
-                ..style = PaintingStyle.stroke
-                ..strokeWidth = selectedStrokePaint.strokeWidth * 2;
-              canvas.drawPath(combinedPath, innerStroke);
+              canvas.drawPath(
+                  combinedPath,
+                  Paint()
+                    ..color = selectedStrokePaint.color
+                    ..style = PaintingStyle.stroke
+                    ..strokeWidth = selectedStrokePaint.strokeWidth * 2);
               canvas.restore();
             });
           }
         } else {
-          for (var tile in regionTiles) {
-            _drawHex(canvas, hexMap, null, fillPaint, tile);
+          for (final tile in regionTiles) {
+            _drawHex(canvas, orientation, null, fillPaint, tile);
             if (isSelected) {
               highlightDrawers.add(() {
-                _drawHex(canvas, hexMap, selectedStrokePaint, null, tile);
+                _drawHex(canvas, orientation, selectedStrokePaint, null, tile);
               });
             }
           }
         }
 
         if (isActiveLayer &&
-            state.labelDisplay != 'None' &&
+            editorState.labelDisplay != LabelDisplay.none &&
             regionTiles.isNotEmpty) {
-          if (region.cachedLabelPosition == null) {
-            if (region.cachedBoundary != null &&
-                region.cachedBoundary!.isNotEmpty) {
-              final allRings = _buildBoundaryPolygons(
-                region.cachedBoundary!,
-                hexMap,
-              );
-
-              List<Map<String, dynamic>> ringData = allRings
-                  .map((r) => {'ring': r, 'area': _signedArea(r)})
-                  .toList();
-              ringData.sort(
-                (a, b) => (b['area'] as double).abs().compareTo(
-                  (a['area'] as double).abs(),
-                ),
-              );
-
-              if (ringData.isNotEmpty) {
-                double maxAreaSign = (ringData.first['area'] as double).sign;
-
-                List<List<Offset>> outerRings = [];
-                List<List<Offset>> holes = [];
-
-                for (var r in ringData) {
-                  if ((r['area'] as double).sign == maxAreaSign) {
-                    outerRings.add(r['ring'] as List<Offset>);
-                  } else {
-                    holes.add(r['ring'] as List<Offset>);
-                  }
-                }
-
-                List<List<List<Offset>>> polygons = outerRings
-                    .map((o) => [o])
-                    .toList();
-
-                for (var hole in holes) {
-                  for (var poly in polygons) {
-                    if (_pointInPolygon(hole.first, poly.first)) {
-                      poly.add(hole);
-                      break;
-                    }
-                  }
-                }
-
-                Offset? bestCenter;
-                double maxDist = -1;
-
-                for (var poly in polygons) {
-                  final result = polylabel(poly, precision: 0.5);
-                  if (result.distance > maxDist) {
-                    maxDist = result.distance;
-                    bestCenter = result.center;
-                  } else if (result.distance == maxDist) {
-                    double avgQ = 0, avgR = 0;
-                    for (var tile in regionTiles) {
-                      avgQ += tile.q;
-                      avgR += tile.r;
-                    }
-                    avgQ /= regionTiles.length;
-                    avgR /= regionTiles.length;
-                    Offset actualCenter = hexFracToPixel(hexMap, avgQ, avgR);
-                    if (bestCenter == null ||
-                        (result.center - actualCenter).distance <
-                            (bestCenter - actualCenter).distance) {
-                      bestCenter = result.center;
-                    }
-                  }
-                }
-
-                region.cachedLabelPosition = bestCenter ?? Offset.zero;
-              } else {
-                region.cachedLabelPosition = Offset.zero;
-              }
-            } else if (region.tiles != null && region.tiles!.isNotEmpty) {
-              // Fallback for layer 0 regions that somehow have no boundary cache
-              region.cachedLabelPosition = hexToPixel(
-                hexMap,
-                region.tiles!.first,
-              );
-            } else {
-              region.cachedLabelPosition = Offset.zero;
-            }
-          }
-
+          _computeLabelIfNeeded(region, regionTiles, orientation);
           final center = region.cachedLabelPosition!;
-          final label = state.labelDisplay == 'ID' ? region.id : region.name;
+          final label = editorState.labelDisplay == LabelDisplay.id
+              ? region.id
+              : region.name;
 
           labelDrawers.add(() {
-            final textPainter = TextPainter(
+            final tp = TextPainter(
               text: TextSpan(
                 text: label,
                 style: TextStyle(
@@ -222,248 +128,146 @@ class HexPainter extends CustomPainter {
               textDirection: TextDirection.ltr,
               textAlign: TextAlign.center,
             );
-            textPainter.layout();
-            textPainter.paint(
-              canvas,
-              Offset(
-                center.dx - textPainter.width / 2,
-                center.dy - textPainter.height / 2,
-              ),
-            );
+            tp.layout();
+            tp.paint(canvas,
+                Offset(center.dx - tp.width / 2, center.dy - tp.height / 2));
           });
         }
       }
     }
 
-    // Draw background grid
-    if (state.showGrid) {
+    // Grid
+    if (editorState.showGrid) {
       final gridStroke = Paint()
         ..color = Colors.white30
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.0 / scale;
-
-      // Draw a 40x40 grid around center
       for (int q = -20; q <= 20; q++) {
         for (int r = -20; r <= 20; r++) {
-          _drawHex(canvas, hexMap, gridStroke, null, HexTile(q: q, r: r));
+          _drawHex(canvas, orientation, gridStroke, null, HexTile(q: q, r: r));
         }
       }
     }
 
-    for (var drawer in highlightDrawers) {
-      drawer();
+    for (final d in highlightDrawers) {
+      d();
+    }
+    for (final d in labelDrawers) {
+      d();
     }
 
-    for (var drawer in labelDrawers) {
-      drawer();
-    }
-
+    // Hover
     if (hoverTile != null) {
-      final hoverFill = Paint()
-        ..color = Colors.white.withValues(alpha: 0.3)
-        ..style = PaintingStyle.fill;
-      final hoverStroke = Paint()
-        ..color = Colors.white
-        ..style = PaintingStyle.stroke
-        ..strokeWidth = 2.0 / scale;
-      _drawHex(canvas, hexMap, hoverStroke, hoverFill, hoverTile!);
+      _drawHex(
+          canvas,
+          orientation,
+          Paint()
+            ..color = Colors.white
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = 2.0 / scale,
+          Paint()
+            ..color = Colors.white.withValues(alpha: 0.3)
+            ..style = PaintingStyle.fill,
+          hoverTile!);
     }
   }
 
-  void _drawHex(
-    Canvas canvas,
-    HexMap hexMap,
-    Paint? stroke,
-    Paint? fill,
-    HexTile tile,
-  ) {
-    final center = hexToPixel(hexMap, tile);
-    final corners = _hexCorners(hexMap, center);
-
-    final path = Path();
-    path.moveTo(corners[0].dx, corners[0].dy);
+  void _drawHex(Canvas canvas, MapOrientation orientation, Paint? stroke,
+      Paint? fill, HexTile tile) {
+    final center = geo.hexToPixel(orientation, hexSize, tile);
+    final corners = geo.hexCorners(orientation, hexSize, center);
+    final path = Path()..moveTo(corners[0].dx, corners[0].dy);
     for (int i = 1; i < 6; i++) {
       path.lineTo(corners[i].dx, corners[i].dy);
     }
     path.close();
-
-    if (fill != null) {
-      canvas.drawPath(path, fill);
-    }
-    if (stroke != null) {
-      canvas.drawPath(path, stroke);
-    }
+    if (fill != null) canvas.drawPath(path, fill);
+    if (stroke != null) canvas.drawPath(path, stroke);
   }
 
-  Offset hexToPixel(HexMap hexMap, HexTile hex) {
-    return hexFracToPixel(hexMap, hex.q.toDouble(), hex.r.toDouble());
+  Color _resolveColor(HexRegion region) {
+    if (region.attributes.containsKey('color')) {
+      var s = region.attributes['color'].toString();
+      if (s.startsWith('#')) s = s.substring(1);
+      if (s.length == 6) s = 'FF$s';
+      return Color(int.tryParse(s, radix: 16) ?? 0xFF000000);
+    }
+    return Color((region.name.hashCode & 0xFFFFFF) | 0xFF000000)
+        .withValues(alpha: 0.6);
   }
 
-  Offset hexFracToPixel(HexMap hexMap, double q, double r) {
-    final isPointy = hexMap.orientation == 'pointy-topped';
-    double x, y;
-    if (isPointy) {
-      x = hexSize * math.sqrt(3) * (q + r / 2);
-      y = hexSize * 3 / 2 * r;
+  void _computeLabelIfNeeded(
+      HexRegion region, List<HexTile> tiles, MapOrientation orientation) {
+    if (region.cachedLabelPosition != null) return;
+
+    if (region.cachedBoundary != null && region.cachedBoundary!.isNotEmpty) {
+      final allRings = paths.buildBoundaryPolygons(
+          region.cachedBoundary!, orientation, hexSize);
+      final ringData = allRings
+          .map((r) => {'ring': r, 'area': paths.signedArea(r)})
+          .toList()
+        ..sort(
+            (a, b) => (b['area'] as double).abs().compareTo(
+                (a['area'] as double).abs()));
+
+      if (ringData.isNotEmpty) {
+        final maxSign = (ringData.first['area'] as double).sign;
+        final outerRings = <List<Offset>>[];
+        final holes = <List<Offset>>[];
+        for (final r in ringData) {
+          if ((r['area'] as double).sign == maxSign) {
+            outerRings.add(r['ring'] as List<Offset>);
+          } else {
+            holes.add(r['ring'] as List<Offset>);
+          }
+        }
+
+        final polygons = outerRings.map((o) => [o]).toList();
+        for (final hole in holes) {
+          for (final poly in polygons) {
+            if (paths.pointInPolygon(hole.first, poly.first)) {
+              poly.add(hole);
+              break;
+            }
+          }
+        }
+
+        Offset? bestCenter;
+        double maxDist = -1;
+        for (final poly in polygons) {
+          final result = polylabel(poly, precision: 0.5);
+          if (result.distance > maxDist) {
+            maxDist = result.distance;
+            bestCenter = result.center;
+          } else if (result.distance == maxDist) {
+            double avgQ = 0, avgR = 0;
+            for (final t in tiles) {
+              avgQ += t.q;
+              avgR += t.r;
+            }
+            avgQ /= tiles.length;
+            avgR /= tiles.length;
+            final actualCenter =
+                geo.hexFracToPixel(orientation, hexSize, avgQ, avgR);
+            if (bestCenter == null ||
+                (result.center - actualCenter).distance <
+                    (bestCenter - actualCenter).distance) {
+              bestCenter = result.center;
+            }
+          }
+        }
+        region.cachedLabelPosition = bestCenter ?? Offset.zero;
+      } else {
+        region.cachedLabelPosition = Offset.zero;
+      }
+    } else if (region.tiles != null && region.tiles!.isNotEmpty) {
+      region.cachedLabelPosition =
+          geo.hexToPixel(orientation, hexSize, region.tiles!.first);
     } else {
-      x = hexSize * 3 / 2 * q;
-      y = hexSize * math.sqrt(3) * (r + q / 2);
+      region.cachedLabelPosition = Offset.zero;
     }
-    return Offset(x, y);
-  }
-
-  List<Offset> _hexCorners(HexMap hexMap, Offset center) {
-    final isPointy = hexMap.orientation == 'pointy-topped';
-    final corners = <Offset>[];
-    for (int i = 0; i < 6; i++) {
-      final angleDeg = 60 * i - (isPointy ? 30 : 0);
-      final angleRad = math.pi / 180 * angleDeg;
-      corners.add(
-        Offset(
-          center.dx + hexSize * math.cos(angleRad),
-          center.dy + hexSize * math.sin(angleRad),
-        ),
-      );
-    }
-    return corners;
   }
 
   @override
-  bool shouldRepaint(covariant HexPainter oldDelegate) {
-    // In a real app we'd compare state fields, for simplicity we repaint often
-    return true;
-  }
-
-  /// Reconstructs continuous Flutter [Path] objects from an unordered set of [DirectedEdge]s.
-  /// 
-  /// Because regions cache their boundaries as disconnected edges, this method
-  /// "stitches" them together by finding edges that share vertices. It handles
-  /// complex non-convex regions, regions with internal holes, and disjointed islands
-  /// by producing multiple closed paths if necessary.
-  List<Path> _buildBoundaryPaths(Set<DirectedEdge> boundary, HexMap hexMap) {
-    Set<DirectedEdge> unvisited = Set.from(boundary);
-    List<Path> paths = [];
-
-    while (unvisited.isNotEmpty) {
-      DirectedEdge start = unvisited.first;
-      Path path = Path();
-
-      DirectedEdge current = start;
-      bool first = true;
-
-      while (true) {
-        unvisited.remove(current);
-
-        final center = hexToPixel(hexMap, HexTile(q: current.q, r: current.r));
-        final corners = _hexCorners(hexMap, center);
-
-        if (first) {
-          path.moveTo(corners[current.d].dx, corners[current.d].dy);
-          first = false;
-        }
-        path.lineTo(
-          corners[(current.d + 1) % 6].dx,
-          corners[(current.d + 1) % 6].dy,
-        );
-
-        var opt1 = DirectedEdge(current.q, current.r, (current.d + 1) % 6);
-        const dq = [1, 0, -1, -1, 0, 1];
-        const dr = [0, 1, 1, 0, -1, -1];
-        var nQ = current.q + dq[(current.d + 1) % 6];
-        var nR = current.r + dr[(current.d + 1) % 6];
-        var opt2 = DirectedEdge(nQ, nR, (current.d + 5) % 6);
-
-        if (unvisited.contains(opt1)) {
-          current = opt1;
-        } else if (unvisited.contains(opt2)) {
-          current = opt2;
-        } else {
-          path.close();
-          break;
-        }
-      }
-      paths.add(path);
-    }
-    return paths;
-  }
-
-  /// Similar to [_buildBoundaryPaths], but returns raw [Offset] lists (polygons)
-  /// instead of Flutter [Path]s. This is primarily used by the Polylabel algorithm
-  /// to calculate geometric centers, as Polylabel requires raw coordinate math.
-  List<List<Offset>> _buildBoundaryPolygons(
-    Set<DirectedEdge> boundary,
-    HexMap hexMap,
-  ) {
-    Set<DirectedEdge> unvisited = Set.from(boundary);
-    List<List<Offset>> polygons = [];
-
-    while (unvisited.isNotEmpty) {
-      DirectedEdge start = unvisited.first;
-      List<Offset> polygon = [];
-
-      DirectedEdge current = start;
-      bool first = true;
-
-      while (true) {
-        unvisited.remove(current);
-
-        final center = hexToPixel(hexMap, HexTile(q: current.q, r: current.r));
-        final corners = _hexCorners(hexMap, center);
-
-        if (first) {
-          polygon.add(corners[current.d]);
-          first = false;
-        }
-        polygon.add(corners[(current.d + 1) % 6]);
-
-        var opt1 = DirectedEdge(current.q, current.r, (current.d + 1) % 6);
-        const dq = [1, 0, -1, -1, 0, 1];
-        const dr = [0, 1, 1, 0, -1, -1];
-        var nQ = current.q + dq[(current.d + 1) % 6];
-        var nR = current.r + dr[(current.d + 1) % 6];
-        var opt2 = DirectedEdge(nQ, nR, (current.d + 5) % 6);
-
-        if (unvisited.contains(opt1)) {
-          current = opt1;
-        } else if (unvisited.contains(opt2)) {
-          current = opt2;
-        } else {
-          break;
-        }
-      }
-      polygons.add(polygon);
-    }
-    return polygons;
-  }
-
-  /// Calculates the signed area of a polygon ring using the Shoelace formula.
-  /// 
-  /// The sign of the returned area dictates the winding order of the polygon:
-  /// - A positive area means the vertices wind clockwise.
-  /// - A negative area means the vertices wind counter-clockwise.
-  /// This is used to differentiate between outer perimeter rings and inner hole rings.
-  double _signedArea(List<Offset> ring) {
-    double area = 0;
-    for (int i = 0, j = ring.length - 1; i < ring.length; j = i++) {
-      area += (ring[j].dx * ring[i].dy) - (ring[i].dx * ring[j].dy);
-    }
-    return area / 2;
-  }
-
-  /// Determines if a given point [p] resides inside the [polygon] using the
-  /// Ray Casting algorithm.
-  bool _pointInPolygon(Offset p, List<Offset> polygon) {
-    bool inside = false;
-    for (int i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
-      if ((polygon[i].dy > p.dy) != (polygon[j].dy > p.dy) &&
-          (p.dx <
-              (polygon[j].dx - polygon[i].dx) *
-                      (p.dy - polygon[i].dy) /
-                      (polygon[j].dy - polygon[i].dy) +
-                  polygon[i].dx)) {
-        inside = !inside;
-      }
-    }
-    return inside;
-  }
+  bool shouldRepaint(covariant HexPainter oldDelegate) => true;
 }

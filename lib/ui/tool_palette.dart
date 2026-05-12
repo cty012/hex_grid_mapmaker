@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
-import 'package:hex_grid_mapmaker/state/app_state.dart';
+import 'package:hex_grid_mapmaker/models/enums.dart';
+import 'package:hex_grid_mapmaker/state/editor_state.dart';
 import 'package:provider/provider.dart';
 
 class ToolPalette extends StatelessWidget {
@@ -7,7 +8,7 @@ class ToolPalette extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final state = context.watch<AppState>();
+    final editor = context.watch<EditorState>();
 
     return Container(
       decoration: BoxDecoration(
@@ -23,64 +24,47 @@ class ToolPalette extends StatelessWidget {
         ],
         border: Border.all(
           color: Colors.white.withValues(alpha: 0.1),
-          width: 1,
         ),
       ),
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          _buildTool(
-            context,
-            state,
-            tool: 'select',
-            icon: Icons.ads_click,
-            tooltip: 'Select Region',
-          ),
+          _buildTool(context, editor,
+              tool: Tool.select, icon: Icons.ads_click, tooltip: 'Select Region'),
           const SizedBox(width: 8),
-          _buildTool(
-            context,
-            state,
-            tool: 'draw',
-            icon: Icons.brush,
-            tooltip: 'Draw Tiles',
-          ),
+          _buildTool(context, editor,
+              tool: Tool.draw, icon: Icons.brush, tooltip: 'Draw Tiles'),
           const SizedBox(width: 8),
-          _buildTool(
-            context,
-            state,
-            tool: 'erase',
-            icon: Icons.cleaning_services,
-            tooltip: 'Erase Tiles',
-          ),
+          _buildTool(context, editor,
+              tool: Tool.erase,
+              icon: Icons.cleaning_services,
+              tooltip: 'Erase Tiles'),
         ],
       ),
     );
   }
 
-  Widget _buildTool(
-    BuildContext context,
-    AppState state, {
-    required String tool,
-    required IconData icon,
-    required String tooltip,
-  }) {
-    final isSelected = state.activeTool == tool;
+  Widget _buildTool(BuildContext context, EditorState editor,
+      {required Tool tool, required IconData icon, required String tooltip}) {
+    final isSelected = editor.activeTool == tool;
     return Tooltip(
       message: tooltip,
       child: Material(
-        color: isSelected ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.2) : Colors.transparent,
+        color: isSelected
+            ? Theme.of(context).colorScheme.primary.withValues(alpha: 0.2)
+            : Colors.transparent,
         borderRadius: BorderRadius.circular(20),
         child: InkWell(
           borderRadius: BorderRadius.circular(20),
-          onTap: () => state.setTool(tool),
+          onTap: () => editor.setTool(tool),
           child: Padding(
             padding: const EdgeInsets.all(12.0),
-            child: Icon(
-              icon,
-              color: isSelected ? Theme.of(context).colorScheme.primary : Colors.white54,
-              size: 24,
-            ),
+            child: Icon(icon,
+                color: isSelected
+                    ? Theme.of(context).colorScheme.primary
+                    : Colors.white54,
+                size: 24),
           ),
         ),
       ),
