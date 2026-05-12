@@ -1,7 +1,16 @@
 import 'package:flutter/material.dart';
 import 'package:hex_grid_mapmaker/models/hex_models.dart';
 
+
+
+/// The central state controller for the Hex Grid Mapmaker application.
+/// 
+/// This class acts as the single source of truth for the [HexMap] data structure
+/// and manages all interactions, tools, UI state, and rendering caches.
+/// Crucially, it handles the mathematical boundary propagation logic to keep
+/// all hierarchical map layers in sync geometrically.
 class AppState extends ChangeNotifier {
+  /// The global map data containing all layers, regions, and tiles.
   HexMap hexMap = HexMap();
 
   String activeTool = 'select'; // 'select', 'draw', 'erase'
@@ -139,6 +148,12 @@ class AppState extends ChangeNotifier {
     };
   }
 
+  /// Computes the union of two boundaries using mathematical edge cancellation.
+  /// 
+  /// When adding a shape (like a tile or a sub-region) to an existing region,
+  /// this algorithm dissolves internal walls. If a new edge opposes an existing
+  /// edge, they represent an internal wall and both are removed. Otherwise,
+  /// the new edge becomes part of the exterior perimeter.
   Set<DirectedEdge> addBoundary(
     Set<DirectedEdge> current,
     Set<DirectedEdge> newBoundary,
@@ -154,6 +169,12 @@ class AppState extends ChangeNotifier {
     return result;
   }
 
+  /// Computes the difference of two boundaries to create holes or dents.
+  /// 
+  /// When removing a shape from an existing region, the edges that formed
+  /// the exterior of the removed shape must be stripped from the parent's boundary.
+  /// Conversely, any *internal* edges of the removed shape now become exposed
+  /// walls, forming a 'dent' or a 'hole' in the parent region.
   Set<DirectedEdge> removeBoundary(
     Set<DirectedEdge> current,
     Set<DirectedEdge> rmBoundary,
@@ -169,6 +190,12 @@ class AppState extends ChangeNotifier {
     return result;
   }
 
+  /// Recursively propagates newly added boundaries upwards through the map layers.
+  /// 
+  /// Whenever a tile is added to Layer 0, the boundary of its parent region on Layer 1
+  /// must be expanded. Consequently, Layer 1's parent region on Layer 2 must also be
+  /// expanded. This recursion ensures that high-level abstract boundaries remain perfectly
+  /// synchronized with ground-level tile adjustments in O(1) mathematical time per layer.
   void _propagateBoundaryAddition(
     String regionId,
     int layerIndex,
@@ -192,6 +219,11 @@ class AppState extends ChangeNotifier {
     } catch (_) {}
   }
 
+  /// Recursively propagates removed boundaries upwards through the map layers.
+  /// 
+  /// Similar to [_propagateBoundaryAddition], when a tile is erased from Layer 0,
+  /// this method propagates the subtraction (dents or holes) upwards so that Layer N
+  /// perfectly reflects the geographical loss of the erased tiles.
   void _propagateBoundaryRemoval(
     String regionId,
     int layerIndex,
@@ -413,6 +445,9 @@ class AppState extends ChangeNotifier {
     }
   }
 
+  /// Resolves the specific region occupying a given hex tile on a specific layer.
+  /// Because layers above 0 only store child region IDs, this recursively searches
+  /// downward through the hierarchy to determine geometric overlap.
   HexRegion? getRegionAtTileForLayer(HexTile tile, int layerIndex) {
     try {
       final layer = hexMap.layers.firstWhere((l) => l.index == layerIndex);
@@ -428,6 +463,8 @@ class AppState extends ChangeNotifier {
     return getRegionAtTileForLayer(tile, activeLayerIndex);
   }
 
+  /// Recursively flattens the hierarchy to retrieve all ground-level [HexTile]s
+  /// that logically belong to the given abstract [region].
   List<HexTile> getTilesForRegion(HexRegion region, int layerIndex) {
     if (layerIndex == 0) {
       return region.tiles ?? [];
@@ -483,6 +520,12 @@ class AppState extends ChangeNotifier {
     notifyListeners();
   }
 
+  /// Safely renames a region's ID globally across the entire map hierarchy.
+  /// 
+  /// 1. Validates that the [newId] is globally unique across all layers.
+  /// 2. Updates the `activeRegionId` state if the renamed region was currently selected.
+  /// 3. Scans the parent layer (`activeLayerIndex + 1`) and automatically refactors any
+  ///    `childRegions` arrays to use the [newId], preventing orphaned references.
   String? updateRegionId(HexRegion region, String newId) {
     if (newId.trim().isEmpty) return 'ID cannot be empty';
     if (region.id == newId) return null;
@@ -516,6 +559,12 @@ class AppState extends ChangeNotifier {
     return null;
   }
 
+  /// Irreversibly deletes a region from the map.
+  /// 
+  /// This not only removes the region from its current layer but also strips its
+  /// geometry from any parent regions on `layerIndex + 1` (creating a geographic hole)
+  /// and removes its ID from any parent references. Child regions in lower layers are
+  /// left orphaned but preserved.
   void deleteRegion(String id) {
     var regionToRemove = activeLayer.regions.firstWhere(
       (r) => r.id == id,

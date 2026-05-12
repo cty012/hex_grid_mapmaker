@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import 'package:hex_grid_mapmaker/state/app_state.dart';
 import 'package:provider/provider.dart';
 
+/// A side panel that displays and edits the metadata (name, ID, attributes)
+/// of the currently selected [HexRegion].
 class PropertiesPanel extends StatefulWidget {
   const PropertiesPanel({super.key});
 
@@ -9,20 +11,31 @@ class PropertiesPanel extends StatefulWidget {
   State<PropertiesPanel> createState() => _PropertiesPanelState();
 }
 
+/// The state for the properties panel.
+/// 
+/// **Critical State Syncing Mechanics:**
+/// Because region switching can happen instantly while a user is typing,
+/// this state maintains localized tracking variables (`_currentRegionId`, `_attributeKeys`).
+/// This decoupling ensures that:
+/// 1. `FocusNode`s don't accidentally write stale, buffered text into a newly selected region.
+/// 2. Editing a map key doesn't scramble the UI by changing Dart's `LinkedHashMap` insertion order.
 class _PropertiesPanelState extends State<PropertiesPanel> {
   final TextEditingController _nameController = TextEditingController();
   final TextEditingController _idController = TextEditingController();
   final FocusNode _idFocusNode = FocusNode();
   String? _idError;
+  String? _currentRegionId;
+  List<String> _attributeKeys = [];
 
   @override
   void initState() {
     super.initState();
+    // Validates and commits the region ID when the user clicks away from the text field.
     _idFocusNode.addListener(() {
       if (!_idFocusNode.hasFocus && mounted) {
         final state = context.read<AppState>();
         final activeRegion = state.activeRegion;
-        if (activeRegion != null) {
+        if (activeRegion != null && activeRegion.id == _currentRegionId) {
           final val = _idController.text;
           if (val != activeRegion.id) {
             final error = state.updateRegionId(activeRegion, val);
@@ -30,6 +43,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
               setState(() { _idError = error; });
             } else {
               setState(() { _idError = null; });
+              _currentRegionId = val;
             }
           }
         }
@@ -51,12 +65,41 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
     final activeRegion = state.activeRegion;
 
     if (activeRegion != null) {
-      if (_nameController.text != activeRegion.name) {
-        _nameController.text = activeRegion.name;
+      if (_currentRegionId != activeRegion.id) {
+        // [Region Swap Detected]
+        // The user clicked a new region in the hierarchy. We must instantly sync our
+        // local controllers to the new region's data to prevent the focus listeners
+        // from applying stale text input to the newly selected region.
+        _currentRegionId = activeRegion.id;
+        _attributeKeys = activeRegion.attributes.keys.toList();
+        _nameController.value = TextEditingValue(
+          text: activeRegion.name,
+          selection: TextSelection.collapsed(offset: activeRegion.name.length),
+        );
+        _idController.value = TextEditingValue(
+          text: activeRegion.id,
+          selection: TextSelection.collapsed(offset: activeRegion.id.length),
+        );
+        _idError = null;
+      } else {
+        // [External Edit Detected]
+        // The region wasn't swapped, but its data changed (e.g. undo/redo, or another tool).
+        // Update the controllers but preserve the user's text cursor position.
+        if (_nameController.text != activeRegion.name) {
+          _nameController.value = TextEditingValue(
+            text: activeRegion.name,
+            selection: TextSelection.collapsed(offset: activeRegion.name.length),
+          );
+        }
+        if (!_idFocusNode.hasFocus && _idController.text != activeRegion.id && _idError == null) {
+          _idController.value = TextEditingValue(
+            text: activeRegion.id,
+            selection: TextSelection.collapsed(offset: activeRegion.id.length),
+          );
+        }
       }
-      if (!_idFocusNode.hasFocus && _idController.text != activeRegion.id && _idError == null) {
-        _idController.text = activeRegion.id;
-      }
+    } else {
+      _currentRegionId = null;
     }
 
     return Container(
@@ -168,6 +211,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
               setState(() { _idError = error; });
             } else {
               setState(() { _idError = null; });
+              _currentRegionId = val;
             }
           },
         ),
@@ -189,8 +233,14 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
             IconButton(
               icon: const Icon(Icons.add, size: 20),
               onPressed: () {
-                final newKey = 'key_${activeRegion.attributes.length}';
+                int counter = activeRegion.attributes.length;
+                String newKey = 'key_$counter';
+                while (activeRegion.attributes.containsKey(newKey)) {
+                  counter++;
+                  newKey = 'key_$counter';
+                }
                 activeRegion.attributes[newKey] = '';
+                _attributeKeys.add(newKey);
                 state.forceUpdate();
               },
               tooltip: 'Add Attribute',
@@ -203,15 +253,23 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
           ],
         ),
         const SizedBox(height: 16),
-        ...activeRegion.attributes.keys.toList().map((key) {
-          return _buildAttributeRow(context, state, activeRegion, key);
+        ..._attributeKeys.asMap().entries.map((entry) {
+          final index = entry.key;
+          final key = entry.value;
+          return _buildAttributeRow(context, state, activeRegion, key, index);
         }),
       ],
     );
   }
 
-  Widget _buildAttributeRow(BuildContext context, AppState state, activeRegion, String key) {
+  /// Builds a single key-value row for the attributes map.
+  /// 
+  /// Utilizes the stable `_attributeKeys[index]` tracker rather than the raw
+  /// `activeRegion.attributes.keys` map to guarantee that the `TextFormField` 
+  /// widget states don't get scrambled or pushed to the bottom when a key is renamed.
+  Widget _buildAttributeRow(BuildContext context, AppState state, activeRegion, String key, int index) {
     return Padding(
+      key: ValueKey('${_currentRegionId}_attr_$index'),
       padding: const EdgeInsets.only(bottom: 12.0),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -222,6 +280,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
               initialValue: key,
               decoration: InputDecoration(
                 hintText: 'Key',
+                hintStyle: TextStyle(color: Colors.white24, fontSize: 13),
                 filled: true,
                 fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
                 border: OutlineInputBorder(
@@ -233,9 +292,11 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
               ),
               style: const TextStyle(fontSize: 13),
               onChanged: (newKey) {
-                if (newKey != key && newKey.isNotEmpty) {
-                  final val = activeRegion.attributes.remove(key);
+                final oldKey = _attributeKeys[index];
+                if (newKey != oldKey && newKey.isNotEmpty) {
+                  final val = activeRegion.attributes.remove(oldKey);
                   activeRegion.attributes[newKey] = val;
+                  _attributeKeys[index] = newKey;
                   state.forceUpdate();
                 }
               },
@@ -245,9 +306,10 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
           Expanded(
             flex: 3,
             child: TextFormField(
-              initialValue: activeRegion.attributes[key].toString(),
+              initialValue: activeRegion.attributes[key]?.toString() ?? '',
               decoration: InputDecoration(
                 hintText: 'Value',
+                hintStyle: TextStyle(color: Colors.white24, fontSize: 13),
                 filled: true,
                 fillColor: Theme.of(context).colorScheme.surfaceContainerHighest,
                 border: OutlineInputBorder(
@@ -259,7 +321,7 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
               ),
               style: const TextStyle(fontSize: 13),
               onChanged: (val) {
-                activeRegion.attributes[key] = val;
+                activeRegion.attributes[_attributeKeys[index]] = val;
                 state.forceUpdate();
               },
             ),
@@ -268,7 +330,8 @@ class _PropertiesPanelState extends State<PropertiesPanel> {
           IconButton(
             icon: const Icon(Icons.close, size: 16, color: Colors.white38),
             onPressed: () {
-              activeRegion.attributes.remove(key);
+              activeRegion.attributes.remove(_attributeKeys[index]);
+              _attributeKeys.removeAt(index);
               state.forceUpdate();
             },
             padding: EdgeInsets.zero,

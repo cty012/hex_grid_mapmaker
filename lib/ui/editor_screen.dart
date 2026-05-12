@@ -10,6 +10,7 @@ import 'package:hex_grid_mapmaker/ui/hex_painter.dart';
 import 'package:hex_grid_mapmaker/ui/hierarchy_panel.dart';
 import 'package:hex_grid_mapmaker/ui/properties_panel.dart';
 import 'package:hex_grid_mapmaker/ui/tool_palette.dart';
+import 'package:hex_grid_mapmaker/utils/file_saver.dart';
 import 'package:provider/provider.dart';
 
 class EditorScreen extends StatefulWidget {
@@ -96,19 +97,29 @@ class _EditorScreenState extends State<EditorScreen>
     final result = await FilePicker.pickFiles(
       type: FileType.custom,
       allowedExtensions: ['json'],
+      withData: true,
     );
 
-    if (result != null && result.files.single.path != null) {
-      final file = File(result.files.single.path!);
-      final content = await file.readAsString();
-      try {
-        final json = jsonDecode(content);
-        final map = HexMap.fromJson(json);
-        state.loadMap(map);
-        _centerAndScaleMap(map);
-        _showNotification('Map loaded successfully');
-      } catch (e) {
-        _showNotification('Error loading map: $e');
+    if (result != null && result.files.isNotEmpty) {
+      final file = result.files.single;
+      String? content;
+
+      if (file.bytes != null) {
+        content = utf8.decode(file.bytes!);
+      } else if (file.path != null) {
+        content = await File(file.path!).readAsString();
+      }
+
+      if (content != null) {
+        try {
+          final json = jsonDecode(content);
+          final map = HexMap.fromJson(json);
+          state.loadMap(map);
+          _centerAndScaleMap(map);
+          _showNotification('Map loaded successfully');
+        } catch (e) {
+          _showNotification('Error loading map: $e');
+        }
       }
     }
   }
@@ -185,18 +196,12 @@ class _EditorScreenState extends State<EditorScreen>
   }
 
   Future<void> _saveMap(AppState state) async {
-    final result = await FilePicker.saveFile(
-      dialogTitle: 'Save map',
-      fileName: 'map.json',
-      type: FileType.custom,
-      allowedExtensions: ['json'],
-    );
-
-    if (result != null) {
-      final file = File(result);
+    try {
       final content = jsonEncode(state.hexMap.toJson());
-      await file.writeAsString(content);
+      await saveFile('map.json', content);
       _showNotification('Map saved successfully');
+    } catch (e) {
+      _showNotification('Error saving map: $e');
     }
   }
 

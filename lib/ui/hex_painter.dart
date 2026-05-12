@@ -4,6 +4,12 @@ import 'package:hex_grid_mapmaker/models/hex_models.dart';
 import 'package:hex_grid_mapmaker/state/app_state.dart';
 import 'package:hex_grid_mapmaker/utils/polylabel.dart';
 
+/// The core rendering engine for the Hex Grid Mapmaker.
+/// 
+/// `HexPainter` runs inside a `CustomPaint` widget and is responsible for drawing
+/// the hexagonal grid, the filled regions, the geometric boundaries, and the text labels.
+/// It translates abstract axial coordinates into 2D pixel space and handles the complex
+/// geometric calculations required to reconstruct continuous paths from unordered edge sets.
 class HexPainter extends CustomPainter {
   final AppState state;
   final double hexSize;
@@ -328,6 +334,12 @@ class HexPainter extends CustomPainter {
     return true;
   }
 
+  /// Reconstructs continuous Flutter [Path] objects from an unordered set of [DirectedEdge]s.
+  /// 
+  /// Because regions cache their boundaries as disconnected edges, this method
+  /// "stitches" them together by finding edges that share vertices. It handles
+  /// complex non-convex regions, regions with internal holes, and disjointed islands
+  /// by producing multiple closed paths if necessary.
   List<Path> _buildBoundaryPaths(Set<DirectedEdge> boundary, HexMap hexMap) {
     Set<DirectedEdge> unvisited = Set.from(boundary);
     List<Path> paths = [];
@@ -375,6 +387,9 @@ class HexPainter extends CustomPainter {
     return paths;
   }
 
+  /// Similar to [_buildBoundaryPaths], but returns raw [Offset] lists (polygons)
+  /// instead of Flutter [Path]s. This is primarily used by the Polylabel algorithm
+  /// to calculate geometric centers, as Polylabel requires raw coordinate math.
   List<List<Offset>> _buildBoundaryPolygons(
     Set<DirectedEdge> boundary,
     HexMap hexMap,
@@ -421,6 +436,12 @@ class HexPainter extends CustomPainter {
     return polygons;
   }
 
+  /// Calculates the signed area of a polygon ring using the Shoelace formula.
+  /// 
+  /// The sign of the returned area dictates the winding order of the polygon:
+  /// - A positive area means the vertices wind clockwise.
+  /// - A negative area means the vertices wind counter-clockwise.
+  /// This is used to differentiate between outer perimeter rings and inner hole rings.
   double _signedArea(List<Offset> ring) {
     double area = 0;
     for (int i = 0, j = ring.length - 1; i < ring.length; j = i++) {
@@ -429,6 +450,8 @@ class HexPainter extends CustomPainter {
     return area / 2;
   }
 
+  /// Determines if a given point [p] resides inside the [polygon] using the
+  /// Ray Casting algorithm.
   bool _pointInPolygon(Offset p, List<Offset> polygon) {
     bool inside = false;
     for (int i = 0, j = polygon.length - 1; i < polygon.length; j = i++) {
