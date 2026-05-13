@@ -3,6 +3,15 @@ import 'package:hex_grid_mapmaker/state/editor_state.dart';
 import 'package:hex_grid_mapmaker/state/map_state.dart';
 import 'package:provider/provider.dart';
 
+/// Left sidebar panel showing the layer/region tree structure.
+///
+/// Provides controls to:
+/// - Switch between layers via a dropdown.
+/// - Add/delete layers.
+/// - Add/delete/select regions within the active layer.
+///
+/// Watches both [MapState] (for region/layer data) and [EditorState]
+/// (for active layer/region selection).
 class HierarchyPanel extends StatelessWidget {
   const HierarchyPanel({super.key});
 

@@ -8,14 +8,31 @@ import 'package:hex_grid_mapmaker/state/editor_state.dart';
 import 'package:hex_grid_mapmaker/state/map_state.dart';
 import 'package:hex_grid_mapmaker/utils/polylabel.dart';
 
-/// Pure painting — all math delegated to services.
+/// Custom painter that renders the hex grid, region fills, boundaries,
+/// selection highlights, labels, and hover feedback.
+///
+/// ## Rendering Pipeline
+///
+/// 1. **Region fills**: For each layer up to the active one, iterate regions.
+///    If the region has cached boundary paths, clip-fill using those paths.
+///    Otherwise, fall back to drawing individual hex tiles.
+/// 2. **Grid overlay**: Draw an unfilled hex grid (41×41 tiles centered at origin).
+/// 3. **Selection highlights**: Pulsating yellow stroke on the selected region.
+/// 4. **Labels**: Text placed at the Pole of Inaccessibility (via Polylabel).
+/// 5. **Hover**: White-highlighted hex under the mouse cursor.
+///
+/// Highlights and labels are drawn in deferred passes to ensure they render
+/// on top of all region fills.
+///
+/// All coordinate math is delegated to [hex_geometry.dart] and
+/// [path_builder.dart] — this class only calls `geo.*` and `paths.*`.
 class HexPainter extends CustomPainter {
-  final MapState mapState;
-  final EditorState editorState;
-  final double hexSize;
-  final HexTile? hoverTile;
-  final double scale;
-  final Animation<double> pulseAnimation;
+  final MapState mapState;       // Read-only access to map data.
+  final EditorState editorState;  // Read-only access to UI state.
+  final double hexSize;           // Pixel radius of each hex.
+  final HexTile? hoverTile;       // Tile under the cursor (null if none).
+  final double scale;             // Current zoom level (for stroke scaling).
+  final Animation<double> pulseAnimation; // Drives selection glow opacity.
 
   HexPainter({
     required this.mapState,
@@ -42,10 +59,13 @@ class HexPainter extends CustomPainter {
       ..style = PaintingStyle.fill
       ..isAntiAlias = false;
 
+    // Deferred draw lists — ensures highlights and labels render on top.
     final labelDrawers = <VoidCallback>[];
     final highlightDrawers = <VoidCallback>[];
 
-    for (int l = 0; l <= editorState.activeLayerIndex; l++) {
+    // Render at most 2 layers: the previous layer (dimmed) and the active layer.
+    final startLayer = (editorState.activeLayerIndex - 1).clamp(0, editorState.activeLayerIndex);
+    for (int l = startLayer; l <= editorState.activeLayerIndex; l++) {
       final currentLayer = hexMap.getLayer(l);
       if (currentLayer == null) continue;
       final isActiveLayer = l == editorState.activeLayerIndex;
@@ -136,7 +156,7 @@ class HexPainter extends CustomPainter {
       }
     }
 
-    // Grid
+    // Draw the hex grid overlay (41×41 tile area around origin).
     if (editorState.showGrid) {
       final gridStroke = Paint()
         ..color = Colors.white30
@@ -156,7 +176,7 @@ class HexPainter extends CustomPainter {
       d();
     }
 
-    // Hover
+    // Draw hover indicator for the tile under the cursor.
     if (hoverTile != null) {
       _drawHex(
           canvas,
@@ -172,6 +192,7 @@ class HexPainter extends CustomPainter {
     }
   }
 
+  /// Draws a single hexagon at [tile]'s pixel position.
   void _drawHex(Canvas canvas, MapOrientation orientation, Paint? stroke,
       Paint? fill, HexTile tile) {
     final center = geo.hexToPixel(orientation, hexSize, tile);
@@ -185,6 +206,11 @@ class HexPainter extends CustomPainter {
     if (stroke != null) canvas.drawPath(path, stroke);
   }
 
+  /// Resolves a region's fill color from its attributes.
+  ///
+  /// If the region has a `'color'` attribute (hex string like `'#FF5733'`),
+  /// it is parsed. Otherwise, a deterministic color is generated from the
+  /// region name's hash code.
   Color _resolveColor(HexRegion region) {
     if (region.attributes.containsKey('color')) {
       var s = region.attributes['color'].toString();
@@ -196,6 +222,12 @@ class HexPainter extends CustomPainter {
         .withValues(alpha: 0.6);
   }
 
+  /// Computes and caches the label position using Polylabel.
+  ///
+  /// Builds vertex polygons from the boundary edges, classifies rings as
+  /// outer boundaries vs holes using signed area, then runs Polylabel on
+  /// each component. If multiple components produce equal distances,
+  /// the one closest to the geometric center of the region's tiles wins.
   void _computeLabelIfNeeded(
       HexRegion region, List<HexTile> tiles, MapOrientation orientation) {
     if (region.cachedLabelPosition != null) return;

@@ -4,6 +4,20 @@ import 'package:hex_grid_mapmaker/state/editor_state.dart';
 import 'package:hex_grid_mapmaker/state/map_state.dart';
 import 'package:provider/provider.dart';
 
+/// Right sidebar panel for editing the selected region's properties.
+///
+/// Shows:
+/// - **Name**: Free-text display name.
+/// - **ID**: Unique identifier (validated globally on submit).
+/// - **Attributes**: Key-value pairs for user-defined metadata (e.g. `color`).
+///
+/// ## State Synchronization
+///
+/// This is a [StatefulWidget] because it owns [TextEditingController]s for the
+/// name and ID fields. Controllers must be synced with the model when the
+/// selected region changes — this happens in [_syncControllers], which is
+/// called every build. The [ValueKey] pattern on attribute rows ensures
+/// Flutter rebuilds the correct widgets when switching between regions.
 class PropertiesPanel extends StatefulWidget {
   const PropertiesPanel({super.key});
 

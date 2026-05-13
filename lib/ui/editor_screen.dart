@@ -17,6 +17,27 @@ import 'package:hex_grid_mapmaker/ui/tool_palette.dart';
 import 'package:hex_grid_mapmaker/utils/file_saver.dart';
 import 'package:provider/provider.dart';
 
+/// The main application screen containing the hex canvas and all panels.
+///
+/// ## Layout Structure
+///
+/// ```
+/// ┌─────────────┬──────────────────────────┬────────────────┐
+/// │             │        AppBar            │                │
+/// │  Hierarchy  ├──────────────────────────┤  Properties    │
+/// │  Panel      │     Interactive Canvas   │  Panel         │
+/// │  (280px)    │     (InteractiveViewer)   │  (320px)       │
+/// │             │                          │                │
+/// │             │     [ToolPalette]         │                │
+/// └─────────────┴──────────────────────────┴────────────────┘
+/// ```
+///
+/// ## Responsibilities
+///
+/// - Hosts the [InteractiveViewer] with pan/zoom and a 10000×10000 canvas.
+/// - Converts mouse events to hex coordinates via [hex_geometry.dart].
+/// - Dispatches tool actions (select/draw/erase) through [MapState]/[EditorState].
+/// - Handles file I/O (load/save JSON) and toast notifications.
 class EditorScreen extends StatefulWidget {
   const EditorScreen({super.key});
 
@@ -26,16 +47,19 @@ class EditorScreen extends StatefulWidget {
 
 class _EditorScreenState extends State<EditorScreen>
     with SingleTickerProviderStateMixin {
+  /// Pixel radius of each hex tile (constant across the session).
   final double hexSize = 40.0;
+
+  /// Controls pan/zoom of the InteractiveViewer.
   final TransformationController _transformationController =
       TransformationController();
 
-  HexTile? hoverTile;
-  double _currentScale = 1.0;
-  final List<_NotificationItem> _notifications = [];
+  HexTile? hoverTile;              // Tile under cursor for hover highlight.
+  double _currentScale = 1.0;       // Cached zoom level for stroke scaling.
+  final List<_NotificationItem> _notifications = []; // Active toast stack.
 
-  late final AnimationController _pulseController;
-  late final Animation<double> _pulseAnimation;
+  late final AnimationController _pulseController;  // Drives selection glow.
+  late final Animation<double> _pulseAnimation;      // 0.3 → 1.0 opacity.
 
   @override
   void initState() {
@@ -48,6 +72,7 @@ class _EditorScreenState extends State<EditorScreen>
         CurvedAnimation(parent: _pulseController, curve: Curves.easeInOut));
   }
 
+  /// Updates cached scale when the user pinch-zooms or scroll-zooms.
   void _onTransformChanged() {
     final scale = _transformationController.value.getMaxScaleOnAxis();
     if (scale != _currentScale) setState(() => _currentScale = scale);
@@ -61,6 +86,7 @@ class _EditorScreenState extends State<EditorScreen>
     super.dispose();
   }
 
+  /// Shows a temporary toast notification at the bottom-right of the canvas.
   void _showNotification(String message) {
     if (!mounted) return;
     setState(() {
@@ -76,6 +102,7 @@ class _EditorScreenState extends State<EditorScreen>
     setState(() => _notifications.removeWhere((n) => n.id == id));
   }
 
+  /// Toggles hex orientation between pointy-topped and flat-topped.
   void _toggleOrientation(MapState mapState) {
     mapState.hexMap.orientation =
         mapState.hexMap.orientation == MapOrientation.pointyTopped
@@ -84,6 +111,7 @@ class _EditorScreenState extends State<EditorScreen>
     mapState.forceUpdate();
   }
 
+  /// Opens a file picker for JSON maps, deserializes, and loads into state.
   Future<void> _loadMap(MapState mapState, EditorState editor) async {
     final result = await FilePicker.pickFiles(
         type: FileType.custom, allowedExtensions: ['json'], withData: true);
@@ -108,6 +136,8 @@ class _EditorScreenState extends State<EditorScreen>
   }
 
 
+  /// Computes the bounding box of all tiles and adjusts the InteractiveViewer
+  /// transform to center and fit the map within the visible viewport.
   void _centerAndScaleMap(HexMap map) {
     if (map.layers.isEmpty) return;
 
@@ -145,6 +175,7 @@ class _EditorScreenState extends State<EditorScreen>
       ..setTranslationRaw((vpWidth / 2) - cx * scale, (vpHeight / 2) - cy * scale, 0);
   }
 
+  /// Serializes the current map to JSON and triggers a file download.
   Future<void> _saveMap(MapState mapState) async {
     try {
       await saveFile('map.json', jsonEncode(mapState.hexMap.toJson()));
@@ -154,12 +185,14 @@ class _EditorScreenState extends State<EditorScreen>
     }
   }
 
+  /// Converts mouse position to hex coordinates and updates hover state.
   void _onHover(Offset pos, Size canvasSize, MapState mapState) {
     final pixel = Offset(pos.dx - canvasSize.width / 2, pos.dy - canvasSize.height / 2);
     final tile = geo.pixelToHex(mapState.hexMap.orientation, hexSize, pixel);
     if (hoverTile != tile) setState(() => hoverTile = tile);
   }
 
+  /// Handles a canvas tap by dispatching the appropriate tool action.
   void _onTap(Offset pos, Size canvasSize, MapState mapState, EditorState editor) {
     final pixel = Offset(pos.dx - canvasSize.width / 2, pos.dy - canvasSize.height / 2);
     final tile = geo.pixelToHex(mapState.hexMap.orientation, hexSize, pixel);

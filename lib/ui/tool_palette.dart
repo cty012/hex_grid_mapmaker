@@ -3,6 +3,10 @@ import 'package:hex_grid_mapmaker/models/enums.dart';
 import 'package:hex_grid_mapmaker/state/editor_state.dart';
 import 'package:provider/provider.dart';
 
+/// Floating toolbar at the bottom of the canvas for switching editor tools.
+///
+/// Only watches [EditorState] — it doesn't depend on map data at all,
+/// so changing tools never triggers a map data rebuild.
 class ToolPalette extends StatelessWidget {
   const ToolPalette({super.key});
 
