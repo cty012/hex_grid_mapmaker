@@ -33,11 +33,15 @@ class HexPainter extends CustomPainter {
   final HexTile? hoverTile;       // Tile under the cursor (null if none).
   final double scale;             // Current zoom level (for stroke scaling).
   final Animation<double> pulseAnimation; // Drives selection glow opacity.
+  final Matrix4 viewTransform;    // InteractiveViewer's current transform.
+  final Size viewportSize;        // Screen viewport dimensions.
 
   HexPainter({
     required this.mapState,
     required this.editorState,
     required this.pulseAnimation,
+    required this.viewTransform,
+    required this.viewportSize,
     this.hexSize = 40.0,
     this.hoverTile,
     this.scale = 1.0,
@@ -156,14 +160,39 @@ class HexPainter extends CustomPainter {
       }
     }
 
-    // Draw the hex grid overlay (41×41 tile area around origin).
+    // Draw an "infinite" hex grid by computing which tiles are visible.
+    // We invert the InteractiveViewer transform to find the pixel-space
+    // bounding box of the viewport, then convert corners to hex coords.
     if (editorState.showGrid) {
       final gridStroke = Paint()
         ..color = Colors.white30
         ..style = PaintingStyle.stroke
         ..strokeWidth = 1.0 / scale;
-      for (int q = -20; q <= 20; q++) {
-        for (int r = -20; r <= 20; r++) {
+
+      // Compute the visible rectangle in canvas space by inverting the
+      // InteractiveViewer transform, then offset by the canvas center
+      // (since paint() calls translate(w/2, h/2) before drawing).
+      final screenRect = Offset.zero & viewportSize;
+      final canvasRect = MatrixUtils.inverseTransformRect(viewTransform, screenRect);
+      final cx = size.width / 2, cy = size.height / 2;
+      final minPx = canvasRect.left - cx, maxPx = canvasRect.right - cx;
+      final minPy = canvasRect.top - cy, maxPy = canvasRect.bottom - cy;
+
+      // Convert all 4 pixel bbox corners to hex coordinates. Because hex
+      // axes are non-orthogonal (skewed), a pixel-space rectangle maps to
+      // a parallelogram in (q,r) space — so we must check all corners to
+      // find the true min/max, not just top-left and bottom-right.
+      final c0 = geo.pixelToHex(orientation, hexSize, Offset(minPx, minPy));
+      final c1 = geo.pixelToHex(orientation, hexSize, Offset(maxPx, minPy));
+      final c2 = geo.pixelToHex(orientation, hexSize, Offset(minPx, maxPy));
+      final c3 = geo.pixelToHex(orientation, hexSize, Offset(maxPx, maxPy));
+      final qMin = [c0.q, c1.q, c2.q, c3.q].reduce((a, b) => a < b ? a : b) - 2;
+      final qMax = [c0.q, c1.q, c2.q, c3.q].reduce((a, b) => a > b ? a : b) + 2;
+      final rMin = [c0.r, c1.r, c2.r, c3.r].reduce((a, b) => a < b ? a : b) - 2;
+      final rMax = [c0.r, c1.r, c2.r, c3.r].reduce((a, b) => a > b ? a : b) + 2;
+
+      for (int q = qMin; q <= qMax; q++) {
+        for (int r = rMin; r <= rMax; r++) {
           _drawHex(canvas, orientation, gridStroke, null, HexTile(q: q, r: r));
         }
       }

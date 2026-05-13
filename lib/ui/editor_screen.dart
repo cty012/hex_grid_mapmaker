@@ -103,16 +103,49 @@ class _EditorScreenState extends State<EditorScreen>
   }
 
   /// Toggles hex orientation between pointy-topped and flat-topped.
+  /// Invalidates all cached label positions since they are in pixel space,
+  /// which changes when the orientation changes.
   void _toggleOrientation(MapState mapState) {
     mapState.hexMap.orientation =
         mapState.hexMap.orientation == MapOrientation.pointyTopped
             ? MapOrientation.flatTopped
             : MapOrientation.pointyTopped;
+    // Label positions are pixel-space Polylabel results — orientation-dependent.
+    for (final layer in mapState.hexMap.layers) {
+      for (final region in layer.regions) {
+        region.cachedLabelPosition = null;
+      }
+    }
     mapState.forceUpdate();
   }
 
   /// Opens a file picker for JSON maps, deserializes, and loads into state.
+  /// Shows a confirmation dialog first to prevent accidental data loss.
   Future<void> _loadMap(MapState mapState, EditorState editor) async {
+    // Only prompt if the current map has data that could be lost.
+    final hasData = mapState.hexMap.layers.any((l) => l.regions.isNotEmpty);
+    if (hasData) {
+      final confirmed = await showDialog<bool>(
+        context: context,
+        builder: (ctx) => AlertDialog(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          title: const Text('Load Map'),
+          content: const Text(
+              'Loading a new map will replace the current one.\nAny unsaved changes will be lost. Continue?'),
+          actions: [
+            TextButton(
+                onPressed: () => Navigator.of(ctx).pop(false),
+                child: const Text('Cancel')),
+            TextButton(
+                style: TextButton.styleFrom(foregroundColor: Colors.orangeAccent),
+                onPressed: () => Navigator.of(ctx).pop(true),
+                child: const Text('Load')),
+          ],
+        ),
+      );
+      if (confirmed != true) return;
+    }
+
     final result = await FilePicker.pickFiles(
         type: FileType.custom, allowedExtensions: ['json'], withData: true);
     if (result == null || result.files.isEmpty) return;
@@ -178,8 +211,10 @@ class _EditorScreenState extends State<EditorScreen>
   /// Serializes the current map to JSON and triggers a file download.
   Future<void> _saveMap(MapState mapState) async {
     try {
-      await saveFile('map.json', jsonEncode(mapState.hexMap.toJson()));
-      _showNotification('Map saved successfully');
+      final saved = await saveFile('map.json', jsonEncode(mapState.hexMap.toJson()));
+      if (saved) {
+        _showNotification('Map saved successfully');
+      }
     } catch (e) {
       _showNotification('Error saving map: $e');
     }
@@ -253,7 +288,9 @@ class _EditorScreenState extends State<EditorScreen>
       body: Row(children: [
         const HierarchyPanel(),
         Expanded(
-          child: Stack(children: [
+          child: LayoutBuilder(builder: (context, constraints) {
+            final viewportSize = Size(constraints.maxWidth, constraints.maxHeight);
+            return Stack(children: [
             InteractiveViewer(
               transformationController: _transformationController,
               constrained: false,
@@ -275,6 +312,8 @@ class _EditorScreenState extends State<EditorScreen>
                       hoverTile: hoverTile,
                       scale: _currentScale,
                       pulseAnimation: _pulseAnimation,
+                      viewTransform: _transformationController.value,
+                      viewportSize: viewportSize,
                     ),
                   ),
                 ),
@@ -307,7 +346,8 @@ class _EditorScreenState extends State<EditorScreen>
                 child: const Icon(Icons.center_focus_strong),
               ),
             ),
-          ]),
+          ]);
+          }),
         ),
         const PropertiesPanel(),
       ]),

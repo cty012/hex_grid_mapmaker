@@ -8,7 +8,7 @@ import 'package:web/web.dart' as web;
 /// Creates an in-memory Blob from the content string, generates a temporary
 /// object URL, programmatically clicks a hidden anchor element to trigger
 /// the browser's download dialog, then revokes the URL to free memory.
-Future<void> saveFile(String filename, String content) async {
+Future<bool> saveFile(String filename, String content) async {
   final bytes = utf8.encode(content);
   final blob = web.Blob(
     [bytes.toJS].toJS,
@@ -20,4 +20,5 @@ Future<void> saveFile(String filename, String content) async {
     ..download = filename;
   anchor.click();
   web.URL.revokeObjectURL(url);
+  return true; // Browser download always triggers (can't detect cancel).
 }
